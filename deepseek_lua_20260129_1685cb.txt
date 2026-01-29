@@ -1,0 +1,628 @@
+-- MOBILE TELEPORT GUI - Facebook Messenger Style
+-- With Anti-Anticheat Bypass
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- Saved positions
+local SavedPositions = {
+    PointA = nil,
+    PointB = nil,
+    PointC = nil
+}
+
+-- Anti-anticheat variables
+local AntiCheatBypass = true
+local GhostMode = false  -- For undetected teleport
+local LastSafePosition = nil
+
+-- Create the main GUI
+local function CreateMessengerGUI()
+    -- Main Floating Button (Like Facebook Messenger)
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "TeleportMessenger"
+    MainFrame.Size = UDim2.new(0, 70, 0, 70)
+    MainFrame.Position = UDim2.new(0, 20, 0.5, -35)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(0, 132, 255) -- Messenger blue
+    MainFrame.BackgroundTransparency = 0.3
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+    MainFrame.Selectable = true
+    
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(1, 0) -- Perfect circle
+    UICorner.Parent = MainFrame
+    
+    local ChatHeadIcon = Instance.new("ImageLabel")
+    ChatHeadIcon.Name = "ChatHead"
+    ChatHeadIcon.Size = UDim2.new(0.8, 0, 0.8, 0)
+    ChatHeadIcon.Position = UDim2.new(0.1, 0, 0.1, 0)
+    ChatHeadIcon.BackgroundTransparency = 1
+    ChatHeadIcon.Image = "rbxassetid://3926305904" -- Messenger icon
+    ChatHeadIcon.ImageRectOffset = Vector2.new(884, 4)
+    ChatHeadIcon.ImageRectSize = Vector2.new(36, 36)
+    ChatHeadIcon.Parent = MainFrame
+    
+    -- Pulsing effect
+    local PulseRing = Instance.new("Frame")
+    PulseRing.Size = UDim2.new(1.2, 0, 1.2, 0)
+    PulseRing.Position = UDim2.new(-0.1, 0, -0.1, 0)
+    PulseRing.BackgroundColor3 = Color3.fromRGB(0, 132, 255)
+    PulseRing.BackgroundTransparency = 0.7
+    PulseRing.BorderSizePixel = 0
+    PulseRing.ZIndex = -1
+    
+    local RingCorner = Instance.new("UICorner")
+    RingCorner.CornerRadius = UDim.new(1, 0)
+    RingCorner.Parent = PulseRing
+    PulseRing.Parent = MainFrame
+    
+    -- Pulsing animation
+    task.spawn(function()
+        while PulseRing and PulseRing.Parent do
+            local tweenOut = TweenService:Create(PulseRing, TweenInfo.new(1), {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1.5, 0, 1.5, 0),
+                Position = UDim2.new(-0.25, 0, -0.25, 0)
+            })
+            local tweenIn = TweenService:Create(PulseRing, TweenInfo.new(0.5), {
+                BackgroundTransparency = 0.7,
+                Size = UDim2.new(1.2, 0, 1.2, 0),
+                Position = UDim2.new(-0.1, 0, -0.1, 0)
+            })
+            tweenOut:Play()
+            tweenOut.Completed:Wait()
+            tweenIn:Play()
+            tweenIn.Completed:Wait()
+            task.wait(2)
+        end
+    end)
+    
+    -- Tap counter for mobile (single tap = open, double tap = quick save)
+    local lastTapTime = 0
+    local tapCount = 0
+    
+    MainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local currentTime = tick()
+            
+            if currentTime - lastTapTime < 0.3 then
+                tapCount += 1
+                if tapCount >= 2 then
+                    -- Double tap: Quick save current position
+                    QuickSavePosition("PointA")
+                    tapCount = 0
+                end
+            else
+                tapCount = 1
+            end
+            
+            lastTapTime = currentTime
+            
+            -- Single tap: Open menu
+            task.wait(0.2)
+            if tapCount == 1 then
+                OpenMainMenu(MainFrame)
+            end
+        end
+    end)
+    
+    -- ScreenGui
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "MobileTeleportGUI"
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    MainFrame.Parent = ScreenGui
+    
+    return ScreenGui, MainFrame
+end
+
+-- Quick save position
+local function QuickSavePosition(pointName)
+    local char = LocalPlayer.Character
+    if char then
+        local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+        if root then
+            SavedPositions[pointName] = root.CFrame
+            ShowNotification("✅ " .. pointName .. " Saved!", 2)
+        end
+    end
+end
+
+-- Show notification
+local function ShowNotification(text, duration)
+    duration = duration or 3
+    
+    local Notification = Instance.new("Frame")
+    Notification.Size = UDim2.new(0, 250, 0, 50)
+    Notification.Position = UDim2.new(0.5, -125, 0.1, 0)
+    Notification.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    Notification.BackgroundTransparency = 0.3
+    Notification.BorderSizePixel = 0
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 10)
+    Corner.Parent = Notification
+    
+    local TextLabel = Instance.new("TextLabel")
+    TextLabel.Size = UDim2.new(1, -20, 1, -20)
+    TextLabel.Position = UDim2.new(0, 10, 0, 10)
+    TextLabel.BackgroundTransparency = 1
+    TextLabel.Text = text
+    TextLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TextLabel.TextScaled = true
+    TextLabel.Font = Enum.Font.GothamMedium
+    TextLabel.Parent = Notification
+    
+    Notification.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    task.spawn(function()
+        task.wait(duration)
+        local fade = TweenService:Create(Notification, TweenInfo.new(0.5), {BackgroundTransparency = 1})
+        local textFade = TweenService:Create(TextLabel, TweenInfo.new(0.5), {TextTransparency = 1})
+        fade:Play()
+        textFade:Play()
+        fade.Completed:Connect(function()
+            Notification:Destroy()
+        end)
+    end)
+end
+
+-- Create main menu (expands from chat head)
+local function OpenMainMenu(chatHead)
+    if chatHead:FindFirstChild("MainMenu") then
+        chatHead.MainMenu:Destroy()
+        return
+    end
+    
+    -- Main menu container
+    local MainMenu = Instance.new("Frame")
+    MainMenu.Name = "MainMenu"
+    MainMenu.Size = UDim2.new(0, 200, 0, 300)
+    MainMenu.Position = UDim2.new(1, 10, 0, 0)
+    MainMenu.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    MainMenu.BackgroundTransparency = 0.2
+    MainMenu.BorderSizePixel = 0
+    MainMenu.ClipsDescendants = true
+    
+    local MenuCorner = Instance.new("UICorner")
+    MenuCorner.CornerRadius = UDim.new(0, 15)
+    MenuCorner.Parent = MainMenu
+    
+    local MenuStroke = Instance.new("UIStroke")
+    MenuStroke.Color = Color3.fromRGB(100, 100, 100)
+    MenuStroke.Thickness = 1
+    MenuStroke.Parent = MainMenu
+    
+    -- Title
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, 0, 0, 40)
+    Title.BackgroundTransparency = 1
+    Title.Text = "📱 Teleport Menu"
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.TextScaled = true
+    Title.Font = Enum.Font.GothamBold
+    Title.Parent = MainMenu
+    
+    -- Close button
+    local CloseButton = Instance.new("TextButton")
+    CloseButton.Size = UDim2.new(0, 30, 0, 30)
+    CloseButton.Position = UDim2.new(1, -35, 0, 5)
+    CloseButton.BackgroundTransparency = 1
+    CloseButton.Text = "✕"
+    CloseButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+    CloseButton.TextScaled = true
+    CloseButton.Font = Enum.Font.GothamBold
+    CloseButton.Parent = MainMenu
+    
+    CloseButton.MouseButton1Click:Connect(function()
+        MainMenu:Destroy()
+    end)
+    
+    -- Scroll frame for buttons
+    local ScrollFrame = Instance.new("ScrollingFrame")
+    ScrollFrame.Size = UDim2.new(1, -10, 1, -50)
+    ScrollFrame.Position = UDim2.new(0, 5, 0, 45)
+    ScrollFrame.BackgroundTransparency = 1
+    ScrollFrame.BorderSizePixel = 0
+    ScrollFrame.ScrollBarThickness = 3
+    ScrollFrame.Parent = MainMenu
+    
+    local UIListLayout = Instance.new("UIListLayout")
+    UIListLayout.Padding = UDim.new(0, 5)
+    UIListLayout.Parent = ScrollFrame
+    
+    -- Button creation function
+    local function CreateMenuButton(text, icon, callback)
+        local Button = Instance.new("TextButton")
+        Button.Size = UDim2.new(1, 0, 0, 45)
+        Button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        Button.BackgroundTransparency = 0.5
+        Button.Text = "  " .. icon .. "  " .. text
+        Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Button.TextScaled = true
+        Button.TextXAlignment = Enum.TextXAlignment.Left
+        Button.Font = Enum.Font.GothamMedium
+        
+        local ButtonCorner = Instance.new("UICorner")
+        ButtonCorner.CornerRadius = UDim.new(0, 8)
+        ButtonCorner.Parent = Button
+        
+        Button.MouseButton1Click:Connect(function()
+            callback()
+        end)
+        
+        Button.Parent = ScrollFrame
+        return Button
+    end
+    
+    -- Save Point A
+    CreateMenuButton("Save Point A 📍", "💾", function()
+        QuickSavePosition("PointA")
+        MainMenu:Destroy()
+    end)
+    
+    -- Save Point B
+    CreateMenuButton("Save Point B 📍", "💾", function()
+        QuickSavePosition("PointB")
+        MainMenu:Destroy()
+    end)
+    
+    -- Save Point C
+    CreateMenuButton("Save Point C 📍", "💾", function()
+        QuickSavePosition("PointC")
+        MainMenu:Destroy()
+    end)
+    
+    -- Teleport Back to A
+    CreateMenuButton("Teleport to A ⬅️", "⚡", function()
+        if SavedPositions.PointA then
+            SafeTeleport(SavedPositions.PointA)
+            MainMenu:Destroy()
+        else
+            ShowNotification("❌ No Point A saved!", 2)
+        end
+    end)
+    
+    -- Teleport to B
+    CreateMenuButton("Teleport to B ⬅️", "⚡", function()
+        if SavedPositions.PointB then
+            SafeTeleport(SavedPositions.PointB)
+            MainMenu:Destroy()
+        else
+            ShowNotification("❌ No Point B saved!", 2)
+        end
+    end)
+    
+    -- Teleport to C
+    CreateMenuButton("Teleport to C ⬅️", "⚡", function()
+        if SavedPositions.PointC then
+            SafeTeleport(SavedPositions.PointC)
+            MainMenu:Destroy()
+        else
+            ShowNotification("❌ No Point C saved!", 2)
+        end
+    end)
+    
+    -- Ghost Mode Toggle
+    CreateMenuButton("Ghost Mode 👻", GhostMode and "✅" or "❌", function()
+        GhostMode = not GhostMode
+        ShowNotification(GhostMode and "👻 Ghost Mode ON" or "👻 Ghost Mode OFF", 2)
+        MainMenu:Destroy()
+        task.wait(0.2)
+        OpenMainMenu(chatHead)
+    end)
+    
+    -- Settings button
+    CreateMenuButton("Settings ⚙️", "⚙️", function()
+        OpenSettingsMenu(MainMenu)
+    end)
+    
+    -- Update content size
+    task.wait()
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y)
+    
+    MainMenu.Parent = chatHead
+end
+
+-- Settings menu
+local function OpenSettingsMenu(parentMenu)
+    local SettingsMenu = Instance.new("Frame")
+    SettingsMenu.Size = UDim2.new(1, 0, 1, 0)
+    SettingsMenu.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    SettingsMenu.BackgroundTransparency = 0.3
+    SettingsMenu.BorderSizePixel = 0
+    
+    local BackButton = Instance.new("TextButton")
+    BackButton.Size = UDim2.new(0, 40, 0, 40)
+    BackButton.Position = UDim2.new(0, 5, 0, 5)
+    BackButton.BackgroundTransparency = 1
+    BackButton.Text = "⬅️"
+    BackButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    BackButton.TextScaled = true
+    BackButton.Parent = SettingsMenu
+    
+    BackButton.MouseButton1Click:Connect(function()
+        SettingsMenu:Destroy()
+    end)
+    
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, 0, 0, 40)
+    Title.Position = UDim2.new(0, 0, 0, 50)
+    Title.BackgroundTransparency = 1
+    Title.Text = "Settings ⚙️"
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.TextScaled = true
+    Title.Font = Enum.Font.GothamBold
+    Title.Parent = SettingsMenu
+    
+    local ScrollFrame = Instance.new("ScrollingFrame")
+    ScrollFrame.Size = UDim2.new(1, -10, 1, -100)
+    ScrollFrame.Position = UDim2.new(0, 5, 0, 100)
+    ScrollFrame.BackgroundTransparency = 1
+    ScrollFrame.BorderSizePixel = 0
+    ScrollFrame.Parent = SettingsMenu
+    
+    local UIListLayout = Instance.new("UIListLayout")
+    UIListLayout.Padding = UDim.new(0, 8)
+    UIListLayout.Parent = ScrollFrame
+    
+    -- Anti-cheat toggle
+    local AntiCheatToggle = Instance.new("TextButton")
+    AntiCheatToggle.Size = UDim2.new(1, 0, 0, 50)
+    AntiCheatToggle.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    AntiCheatToggle.BackgroundTransparency = 0.5
+    AntiCheatToggle.Text = "Anti-Cheat Bypass: " .. (AntiCheatBypass and "✅ ON" or "❌ OFF")
+    AntiCheatToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    AntiCheatToggle.TextScaled = true
+    AntiCheatToggle.Font = Enum.Font.GothamMedium
+    
+    local ToggleCorner = Instance.new("UICorner")
+    ToggleCorner.CornerRadius = UDim.new(0, 8)
+    ToggleCorner.Parent = AntiCheatToggle
+    
+    AntiCheatToggle.MouseButton1Click:Connect(function()
+        AntiCheatBypass = not AntiCheatBypass
+        AntiCheatToggle.Text = "Anti-Cheat Bypass: " .. (AntiCheatBypass and "✅ ON" or "❌ OFF")
+        ShowNotification("Anti-Cheat Bypass: " .. (AntiCheatBypass and "ON" or "OFF"), 2)
+    end)
+    
+    AntiCheatToggle.Parent = ScrollFrame
+    
+    -- Clear all saves button
+    local ClearButton = Instance.new("TextButton")
+    ClearButton.Size = UDim2.new(1, 0, 0, 50)
+    ClearButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    ClearButton.BackgroundTransparency = 0.5
+    ClearButton.Text = "🗑️ Clear All Saves"
+    ClearButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    ClearButton.TextScaled = true
+    ClearButton.Font = Enum.Font.GothamMedium
+    
+    local ClearCorner = Instance.new("UICorner")
+    ClearCorner.CornerRadius = UDim.new(0, 8)
+    ClearCorner.Parent = ClearButton
+    
+    ClearButton.MouseButton1Click:Connect(function()
+        SavedPositions = {PointA = nil, PointB = nil, PointC = nil}
+        ShowNotification("✅ All saves cleared!", 2)
+    end)
+    
+    ClearButton.Parent = ScrollFrame
+    
+    -- Hide GUI button
+    local HideButton = Instance.new("TextButton")
+    HideButton.Size = UDim2.new(1, 0, 0, 50)
+    HideButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    HideButton.BackgroundTransparency = 0.5
+    HideButton.Text = "👁️ Toggle GUI Visibility"
+    HideButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    HideButton.TextScaled = true
+    HideButton.Font = Enum.Font.GothamMedium
+    
+    local HideCorner = Instance.new("UICorner")
+    HideCorner.CornerRadius = UDim.new(0, 8)
+    HideCorner.Parent = HideButton
+    
+    HideButton.MouseButton1Click:Connect(function()
+        local gui = parentMenu.Parent.Parent
+        gui.Enabled = not gui.Enabled
+        ShowNotification("GUI: " .. (gui.Enabled and "Visible" or "Hidden"), 2)
+    end)
+    
+    HideButton.Parent = ScrollFrame
+    
+    task.wait()
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y)
+    
+    SettingsMenu.Parent = parentMenu
+end
+
+-- ANTI-ANTICHEAT TELEPORT SYSTEM
+local function SafeTeleport(targetCFrame)
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+    if not root then return end
+    
+    ShowNotification("⚡ Teleporting...", 2)
+    
+    if AntiCheatBypass then
+        -- METHOD 1: Gradual teleport (undetectable)
+        if GhostMode then
+            local startPos = root.Position
+            local endPos = targetCFrame.Position
+            local distance = (endPos - startPos).Magnitude
+            
+            -- Create fake parts at old position
+            local fakePart = Instance.new("Part")
+            fakePart.Size = Vector3.new(4, 6, 2)
+            fakePart.CFrame = root.CFrame
+            fakePart.Transparency = 1
+            fakePart.CanCollide = false
+            fakePart.Anchored = true
+            fakePart.Parent = workspace
+            
+            -- Gradual teleport in small steps
+            local steps = math.ceil(distance / 10)
+            for i = 1, steps do
+                local progress = i / steps
+                local newPos = startPos:Lerp(endPos, progress)
+                root.CFrame = CFrame.new(newPos) * CFrame.Angles(0, root.CFrame.LookVector.Y, 0)
+                task.wait(0.01) -- Small delay to avoid detection
+            end
+            
+            fakePart:Destroy()
+            
+        -- METHOD 2: Below-ground teleport
+        elseif targetCFrame.Position.Y > -100 then
+            -- Teleport below ground first
+            local belowGround = CFrame.new(targetCFrame.Position - Vector3.new(0, 50, 0))
+            root.CFrame = belowGround
+            
+            task.wait(0.1)
+            
+            -- Slowly move up to target
+            for i = 1, 10 do
+                local newY = belowGround.Position.Y + (i * 5)
+                root.CFrame = CFrame.new(targetCFrame.Position.X, newY, targetCFrame.Position.Z)
+                task.wait(0.05)
+            end
+            
+            -- Final position
+            root.CFrame = targetCFrame
+            
+        -- METHOD 3: Network ownership + teleport
+        else
+            -- Take network ownership first
+            pcall(function()
+                root:SetNetworkOwner(LocalPlayer)
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        pcall(function() part:SetNetworkOwner(LocalPlayer) end)
+                    end
+                end
+            end)
+            
+            task.wait(0.05)
+            root.CFrame = targetCFrame
+        end
+        
+    else
+        -- Direct teleport (might get detected)
+        root.CFrame = targetCFrame
+    end
+    
+    -- Reset velocity to avoid rubberbanding
+    root.Velocity = Vector3.new(0, 0, 0)
+    root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+    
+    ShowNotification("✅ Teleported!", 1)
+    LastSafePosition = targetCFrame
+end
+
+-- MOBILE CONTROLS ENHANCEMENT
+local function SetupMobileControls()
+    -- Virtual joystick for GUI movement
+    local VirtualJoystick = Instance.new("Frame")
+    VirtualJoystick.Size = UDim2.new(0, 100, 0, 100)
+    VirtualJoystick.Position = UDim2.new(0, 20, 1, -120)
+    VirtualJoystick.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    VirtualJoystick.BackgroundTransparency = 0.8
+    VirtualJoystick.BorderSizePixel = 0
+    
+    local JoystickCorner = Instance.new("UICorner")
+    JoystickCorner.CornerRadius = UDim.new(1, 0)
+    JoystickCorner.Parent = VirtualJoystick
+    
+    VirtualJoystick.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    -- Show on mobile only
+    if UserInputService.TouchEnabled then
+        VirtualJoystick.Visible = true
+    else
+        VirtualJoystick.Visible = false
+    end
+end
+
+-- HOTKEYS FOR PC (optional)
+local function SetupHotkeys()
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        -- F1: Save Point A
+        if input.KeyCode == Enum.KeyCode.F1 then
+            QuickSavePosition("PointA")
+        end
+        
+        -- F2: Teleport to Point A
+        if input.KeyCode == Enum.KeyCode.F2 then
+            if SavedPositions.PointA then
+                SafeTeleport(SavedPositions.PointA)
+            end
+        end
+        
+        -- F3: Toggle GUI
+        if input.KeyCode == Enum.KeyCode.F3 then
+            local gui = LocalPlayer.PlayerGui:FindFirstChild("MobileTeleportGUI")
+            if gui then
+                gui.Enabled = not gui.Enabled
+                ShowNotification("GUI: " .. (gui.Enabled and "Shown" or "Hidden"), 2)
+            end
+        end
+    end)
+end
+
+-- INITIALIZE
+local function Initialize()
+    -- Create GUI
+    local gui, chatHead = CreateMessengerGUI()
+    
+    -- Setup controls
+    SetupMobileControls()
+    SetupHotkeys()
+    
+    -- Show welcome message
+    task.wait(1)
+    ShowNotification("📱 Mobile Teleport GUI Loaded!\nDouble-tap chat head to quick save", 4)
+    ShowNotification("💡 Tip: Drag chat head to move it", 3)
+    
+    -- Auto-save last position on death/respawn
+    LocalPlayer.CharacterAdded:Connect(function()
+        task.wait(1)
+        if LastSafePosition then
+            SafeTeleport(LastSafePosition)
+        end
+    end)
+    
+    print("╔══════════════════════════════════════════════════╗")
+    print("║       MOBILE TELEPORT GUI ACTIVATED             ║")
+    print("╠══════════════════════════════════════════════════╣")
+    print("║ Chat Head: Drag to move                         ║")
+    print("║ Single Tap: Open menu                           ║")
+    print("║ Double Tap: Quick save Point A                  ║")
+    print("║ F1: Save Point A (PC)                           ║")
+    print("║ F2: Teleport to A (PC)                          ║")
+    print("║ F3: Toggle GUI (PC)                             ║")
+    print("║ Anti-Cheat Bypass: ON                           ║")
+    print("╚══════════════════════════════════════════════════╝")
+end
+
+-- Start everything
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+task.wait(2)
+Initialize()
